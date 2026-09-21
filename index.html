@@ -57,134 +57,4605 @@ canvas{width:100%;height:100%;display:block;touch-action:none}.hud{position:abso
 <script>
 (() => {
 'use strict';
+
 document.documentElement.classList.add('js-ready');
-const canvas=document.getElementById('game'),ctx=canvas.getContext('2d'),wrap=document.getElementById('arenaWrap');
-const $=id=>document.getElementById(id), clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), rand=(a,b)=>a+Math.random()*(b-a);
-let W=900,H=620,dpr=1,last=0,over=false,playerScore=0,aiScore=0,decisionNo=0,aiTimer=0;
-const keys=new Set();
-const walls=[],bullets=[],particles=[];
-const DIRS={UP:{x:0,y:-1,a:-Math.PI/2},DOWN:{x:0,y:1,a:Math.PI/2},LEFT:{x:-1,y:0,a:Math.PI},RIGHT:{x:1,y:0,a:0},STOP:{x:0,y:0,a:0}};
-const names=['UP','DOWN','LEFT','RIGHT','STOP'];
-function resize(){const r=wrap.getBoundingClientRect();W=Math.max(320,r.width);H=Math.max(320,r.height);dpr=Math.min(2,devicePixelRatio||1);canvas.width=Math.floor(W*dpr);canvas.height=Math.floor(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}
-window.addEventListener('resize',resize);resize();
-if(location.protocol==='file:'){$('modelStatus').textContent='LOCAL FILE · LOCAL AI';$('engineChip').textContent='LOCAL AI';}
-function makeTank(x,y,color,label){return{x,y,r:17,color,label,dir:'UP',speed:145,hp:3,cool:0,move:'STOP',flash:0}}
-let p,a;
-function addWall(x,y,w,h,hp=3){walls.push({x,y,w,h,hp,max:hp})}
-function reset(){
-  over=false;bullets.length=0;particles.length=0;walls.length=0;decisionNo=0;aiTimer=0;
-  p=makeTank(W*.5,H*.82,'#58a9ff','P');a=makeTank(W*.5,H*.18,'#ff646d','AI');a.dir='DOWN';
-  const bw=Math.min(78,W*.09),bh=26;
-  const presets=[[.18,.24],[.36,.31],[.62,.31],[.80,.24],[.26,.49],[.50,.46],[.74,.49],[.18,.69],[.39,.66],[.61,.66],[.82,.69]];
-  for(const [rx,ry] of presets){let x=rx*W-bw/2,y=ry*H-bh/2;if(Math.hypot(x-p.x,y-p.y)>90&&Math.hypot(x-a.x,y-a.y)>90)addWall(x,y,bw,bh,Math.random()<.35?5:3)}
-  $('overlay').classList.remove('show');updateHud();addLog('INIT','新回合开始');
-}
-function rectCircle(w,t,nx=t.x,ny=t.y){const cx=clamp(nx,w.x,w.x+w.w),cy=clamp(ny,w.y,w.y+w.h);return (nx-cx)**2+(ny-cy)**2<t.r**2}
-function canMove(t,nx,ny){if(nx<t.r+5||nx>W-t.r-5||ny<t.r+5||ny>H-t.r-5)return false;for(const w of walls)if(rectCircle(w,t,nx,ny))return false;return true}
-function moveTank(t,dir,dt){if(dir==='STOP')return;const d=DIRS[dir];t.dir=dir;const nx=t.x+d.x*t.speed*dt,ny=t.y+d.y*t.speed*dt;if(canMove(t,nx,ny)){t.x=nx;t.y=ny}else{const nx2=t.x+d.x*t.speed*dt;if(canMove(t,nx2,t.y))t.x=nx2;const ny2=t.y+d.y*t.speed*dt;if(canMove(t,t.x,ny2))t.y=ny2}}
-function shoot(t,owner){if(t.cool>0||over)return;const d=DIRS[t.dir];bullets.push({x:t.x+d.x*24,y:t.y+d.y*24,vx:d.x*310,vy:d.y*310,r:4,owner,life:3});t.cool=.42;t.flash=.08}
-function burst(x,y,c,n=9){for(let i=0;i<n;i++)particles.push({x,y,vx:rand(-90,90),vy:rand(-90,90),life:rand(.25,.65),c})}
-function hitTank(b,t){return (b.x-t.x)**2+(b.y-t.y)**2<(b.r+t.r)**2}
-function updateBullets(dt){for(let i=bullets.length-1;i>=0;i--){const b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;let gone=b.life<=0||b.x<0||b.y<0||b.x>W||b.y>H;
-  for(let j=walls.length-1;!gone&&j>=0;j--){const w=walls[j];if(b.x>w.x&&b.x<w.x+w.w&&b.y>w.y&&b.y<w.y+w.h){w.hp--;burst(b.x,b.y,'#d5a566',5);bullets.splice(i,1);gone=true;if(w.hp<=0){burst(w.x+w.w/2,w.y+w.h/2,'#c6894f',15);walls.splice(j,1)}}}
-  if(gone)continue;const target=b.owner==='p'?a:p;if(hitTank(b,target)){target.hp--;target.flash=.18;burst(b.x,b.y,b.owner==='p'?'#77bbff':'#ff8088',13);bullets.splice(i,1);if(target.hp<=0)endRound(b.owner)}
-}}
-function endRound(winner){over=true;if(winner==='p'){playerScore++;$('overTitle').textContent='YOU WIN';$('overText').textContent='你击毁了 AI 坦克。Jev 决策日志保留在右侧，可观察最后几步的战术变化。'}else{aiScore++;$('overTitle').textContent='AI WINS';$('overText').textContent='AI 完成击毁。再来一局，尝试利用墙体和射击冷却反制它。'}$('overlay').classList.add('show');updateHud()}
-function updateHud(){$('pScore').textContent=playerScore;$('aScore').textContent=aiScore;$('pHp').textContent='♥'.repeat(Math.max(0,p.hp))+'♡'.repeat(Math.max(0,3-p.hp));$('aHp').textContent='♥'.repeat(Math.max(0,a.hp))+'♡'.repeat(Math.max(0,3-a.hp))}
-function los(from,to){const steps=Math.ceil(Math.hypot(to.x-from.x,to.y-from.y)/10);for(let i=1;i<steps;i++){const x=from.x+(to.x-from.x)*i/steps,y=from.y+(to.y-from.y)*i/steps;for(const w of walls)if(x>w.x&&x<w.x+w.w&&y>w.y&&y<w.y+w.h)return false}return true}
-function incomingDanger(){let best=0;for(const b of bullets){if(b.owner!=='p')continue;const dx=a.x-b.x,dy=a.y-b.y;const toward=dx*b.vx+dy*b.vy>0;if(!toward)continue;const cross=Math.abs(dx*b.vy-dy*b.vx)/Math.max(1,Math.hypot(b.vx,b.vy));if(cross<30){const dist=Math.hypot(dx,dy);best=Math.max(best,1-clamp(dist/330,0,1))}}return best}
-function directionToward(dx,dy){return Math.abs(dx)>Math.abs(dy)?(dx>0?'RIGHT':'LEFT'):(dy>0?'DOWN':'UP')}
-function directionAway(dx,dy){return Math.abs(dx)>Math.abs(dy)?(dx>0?'LEFT':'RIGHT'):(dy>0?'UP':'DOWN')}
-function legal(dir){const d=DIRS[dir],test=38;return canMove(a,a.x+d.x*test,a.y+d.y*test)}
-function localJevDecision(){
-  const dx=p.x-a.x,dy=p.y-a.y,dist=Math.hypot(dx,dy),danger=incomingDanger(),clear=los(a,p);
-  const alignedX=Math.abs(dx)<29,alignedY=Math.abs(dy)<29;let strategy='CHASE',reason='缩短距离并寻找射击角度。',conf=.74;
-  if(danger>.38){strategy='EVADE';reason='检测到玩家子弹轨迹，优先规避。';conf=.9}
-  else if((alignedX||alignedY)&&clear){strategy='ATTACK';reason='获得无遮挡射击线，进入攻击模式。';conf=.86}
-  else if(dist<120){strategy='RETREAT';reason='距离过近，拉开空间避免贴身交换。';conf=.72}
-  else if(!clear&&dist<330){strategy='FLANK';reason='直线路径被墙体遮挡，尝试侧向寻找火线。';conf=.76}
-  let base=directionToward(dx,dy);if(strategy==='RETREAT')base=directionAway(dx,dy);
-  if(strategy==='EVADE'){
-    const incoming=bullets.filter(b=>b.owner==='p').sort((u,v)=>((u.x-a.x)**2+(u.y-a.y)**2)-((v.x-a.x)**2+(v.y-a.y)**2))[0];
-    if(incoming)base=Math.abs(incoming.vx)>Math.abs(incoming.vy)?(dy>0?'DOWN':'UP'):(dx>0?'RIGHT':'LEFT');
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('arenaWrap');
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+const rand = (a,b) => a + Math.random() * (b-a);
+
+let W = 900;
+let H = 620;
+let dpr = 1;
+let last = 0;
+
+let over = false;
+let playerScore = 0;
+let aiScore = 0;
+let decisionNo = 0;
+
+let aiDecisionTimer = 0;
+let tacticalTimer = 0;
+let pathTimer = 0;
+
+let jevInFlight = false;
+let jevFailures = 0;
+let jevRetryAt = 0;
+
+const keys = new Set();
+
+const walls = [];
+const bullets = [];
+const particles = [];
+
+const DIRS = {
+  UP: {
+    x: 0,
+    y: -1,
+    a: -Math.PI/2
+  },
+
+  DOWN: {
+    x: 0,
+    y: 1,
+    a: Math.PI/2
+  },
+
+  LEFT: {
+    x: -1,
+    y: 0,
+    a: Math.PI
+  },
+
+  RIGHT: {
+    x: 1,
+    y: 0,
+    a: 0
+  },
+
+  STOP: {
+    x: 0,
+    y: 0,
+    a: 0
   }
-  if(strategy==='FLANK')base=Math.abs(dx)>Math.abs(dy)?(dy>0?'DOWN':'UP'):(dx>0?'RIGHT':'LEFT');
-  if(!legal(base)){const options=names.filter(n=>n!=='STOP'&&legal(n));base=options.length?options[Math.floor(Math.random()*options.length)]:'STOP'}
-  let probs={UP:.06,DOWN:.06,LEFT:.06,RIGHT:.06,STOP:.04};probs[base]=.72;for(const n of names)if(n!=='STOP'&&!legal(n)){probs[n]=.01;probs[base]+=.05}
-  const sum=Object.values(probs).reduce((s,v)=>s+v,0);for(const n of names)probs[n]/=sum;
-  let fireP=.08;if(clear&&(alignedX||alignedY))fireP=.91;else if(clear&&dist<180)fireP=.45;else if(strategy==='ATTACK')fireP=.65;fireP=clamp(fireP+(Math.random()-.5)*.08,0.03,.96);
-  return{strategy,reason,confidence:conf,movement:base,moveProbabilities:probs,fireProbability:fireP,danger:clamp(danger*.9+(dist<100?.12:0),0,1),state:{distance:Math.round(dist),lineOfSight:clear,aligned:alignedX||alignedY}}
+};
+
+const names = [
+  'UP',
+  'DOWN',
+  'LEFT',
+  'RIGHT',
+  'STOP'
+];
+
+
+/*
+ * ===========================
+ * 强 AI 状态
+ * ===========================
+ */
+
+const AI = {
+
+  strategy: 'CHASE',
+
+  strategyUntil: 0,
+
+  confidence: .72,
+
+  reason:
+    '追踪玩家并寻找射击角度。',
+
+  target: null,
+
+  path: [],
+
+  pathIndex: 0,
+
+  predicted: {
+    x: 0,
+    y: 0
+  },
+
+  threat: null,
+
+  moveProbabilities: {
+    UP: .1,
+    DOWN: .1,
+    LEFT: .1,
+    RIGHT: .1,
+    STOP: .6
+  },
+
+  fireProbability: .1,
+
+  danger: 0,
+
+  lastPlayer: {
+    x: 0,
+    y: 0,
+    t: performance.now()
+  },
+
+  playerVelocity: {
+    x: 0,
+    y: 0
+  },
+
+  stuckTime: 0,
+
+  lastPos: {
+    x: 0,
+    y: 0
+  },
+
+  lastT: performance.now()
+};
+
+
+/*
+ * ===========================
+ * Canvas
+ * ===========================
+ */
+
+function resize(){
+
+  const r =
+    wrap.getBoundingClientRect();
+
+  W =
+    Math.max(
+      320,
+      r.width
+    );
+
+  H =
+    Math.max(
+      320,
+      r.height
+    );
+
+  dpr =
+    Math.min(
+      2,
+      devicePixelRatio || 1
+    );
+
+  canvas.width =
+    Math.floor(
+      W * dpr
+    );
+
+  canvas.height =
+    Math.floor(
+      H * dpr
+    );
+
+  ctx.setTransform(
+    dpr,
+    0,
+    0,
+    dpr,
+    0,
+    0
+  );
 }
-function buildJevState(){
-  const dx=p.x-a.x,dy=p.y-a.y;
-  const compactWalls=walls.map(w=>({x:Math.round(w.x),y:Math.round(w.y),w:Math.round(w.w),h:Math.round(w.h),hp:w.hp}));
-  const playerBullets=bullets.filter(b=>b.owner==='p').slice(0,8).map(b=>({x:Math.round(b.x),y:Math.round(b.y),vx:Math.round(b.vx),vy:Math.round(b.vy)}));
+
+window.addEventListener(
+  'resize',
+  resize
+);
+
+resize();
+
+
+/*
+ * ===========================
+ * 坦克
+ * ===========================
+ */
+
+function makeTank(
+  x,
+  y,
+  color,
+  label
+){
+
   return {
-    arena:{width:Math.round(W),height:Math.round(H)},
-    ai:{x:Math.round(a.x),y:Math.round(a.y),direction:a.dir,hp:a.hp,shotReady:a.cool<=0},
-    player:{x:Math.round(p.x),y:Math.round(p.y),direction:p.dir,hp:p.hp},
-    geometry:{dx:Math.round(dx),dy:Math.round(dy),distance:Math.round(Math.hypot(dx,dy)),lineOfSight:los(a,p),alignedX:Math.abs(dx)<29,alignedY:Math.abs(dy)<29},
-    incomingDanger:Number(incomingDanger().toFixed(3)),
-    legalMoves:Object.fromEntries(names.map(n=>[n,n==='STOP'||legal(n)])),
-    playerBullets,
-    walls:compactWalls
+
+    x,
+    y,
+
+    r: 17,
+
+    color,
+
+    label,
+
+    dir: 'UP',
+
+    speed: 145,
+
+    hp: 3,
+
+    cool: 0,
+
+    move: 'STOP',
+
+    flash: 0
+
   };
 }
-function mapJevResponse(raw){
-  const root=raw&&raw.result?raw.result:raw;
-  const ans=root&&root.answers;
-  if(!ans||!ans.strategy||!ans.movement||!ans.fire||!ans.danger)throw new Error('Invalid Jev response');
-  const strategy=ans.strategy.choice||'CHASE';
-  const movement=ans.movement.choice||'STOP';
-  const probs=ans.movement.probabilities||{};
-  const moveProbabilities=Object.fromEntries(names.map(n=>[n,Number(probs[n]??(n===movement?1:0))]));
-  const dangerMax=Math.max(1,Object.keys(ans.danger.legend||{}).length-1);
-  const danger=clamp(Number(ans.danger.score||0)/dangerMax,0,1);
-  const reason={ATTACK:'Jev 选择主动攻击并利用当前火线。',CHASE:'Jev 选择追击，缩短距离并改善位置。',EVADE:'Jev 判断威胁较高，优先规避。',FLANK:'Jev 选择绕过掩体寻找侧翼火线。',RETREAT:'Jev 选择拉开距离，降低近身风险。'}[strategy]||'Jev 已根据当前战场状态做出决策。';
-  return {strategy,reason,confidence:Number(ans.strategy.confidence||.5),movement,moveProbabilities,fireProbability:clamp(Number(ans.fire.noul||0),0,1),danger,state:buildJevState(),model:root.model||'typesafe/jev'};
+
+
+let p;
+let a;
+
+
+function addWall(
+  x,
+  y,
+  w,
+  h,
+  hp = 3
+){
+
+  walls.push({
+
+    x,
+    y,
+    w,
+    h,
+
+    hp,
+
+    max: hp
+
+  });
 }
-let jevFailures=0,jevInFlight=false,jevRetryAt=0;
-async function decide(){
-  if(jevInFlight||Date.now()<jevRetryAt){applyDecision(localJevDecision());return;}
-  jevInFlight=true;
-  try{
-    const res=await fetch('/api/jev',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({state:buildJevState()})});
-    if(!res.ok)throw new Error('Jev API '+res.status);
-    const raw=await res.json();
-    const d=mapJevResponse(raw);
-    jevFailures=0;
-    jevRetryAt=0;
-    $('modelStatus').textContent=(d.model||'typesafe/jev').toUpperCase()+' · LIVE';
-    $('engineChip').textContent='REAL JEV';
-    applyDecision(d);
-  }catch(err){
-    jevFailures++;
-    if(String(err).includes('503')) jevRetryAt=Date.now()+30000;
-    const d=localJevDecision();
-    $('modelStatus').textContent='LOCAL FALLBACK · '+(jevFailures>1?'API UNAVAILABLE':'RETRYING');
-    $('engineChip').textContent='LOCAL FALLBACK';
-    applyDecision(d);
-  } finally {
-    jevInFlight=false;
+
+
+function reset(){
+
+  over = false;
+
+  bullets.length = 0;
+  particles.length = 0;
+  walls.length = 0;
+
+  decisionNo = 0;
+
+  aiDecisionTimer = .2;
+
+  tacticalTimer = 0;
+
+  pathTimer = 0;
+
+
+  /*
+   * 玩家
+   */
+
+  p =
+    makeTank(
+      W * .5,
+      H * .82,
+      '#58a9ff',
+      'P'
+    );
+
+
+  /*
+   * AI
+   */
+
+  a =
+    makeTank(
+      W * .5,
+      H * .18,
+      '#ff646d',
+      'AI'
+    );
+
+
+  a.dir = 'DOWN';
+
+
+  /*
+   * 强 AI 参数
+   */
+
+  a.speed = 182;
+
+  a.shotCooldown = .28;
+
+  p.shotCooldown = .42;
+
+
+  /*
+   * 地图
+   */
+
+  const bw =
+    Math.min(
+      78,
+      W * .09
+    );
+
+  const bh = 26;
+
+
+  const presets = [
+
+    [.18,.24],
+
+    [.36,.31],
+
+    [.62,.31],
+
+    [.80,.24],
+
+    [.26,.49],
+
+    [.50,.46],
+
+    [.74,.49],
+
+    [.18,.69],
+
+    [.39,.66],
+
+    [.61,.66],
+
+    [.82,.69]
+
+  ];
+
+
+  for(
+    const [rx,ry]
+    of presets
+  ){
+
+    const x =
+      rx * W -
+      bw / 2;
+
+    const y =
+      ry * H -
+      bh / 2;
+
+
+    if(
+      Math.hypot(
+        x-p.x,
+        y-p.y
+      ) > 90
+      &&
+      Math.hypot(
+        x-a.x,
+        y-a.y
+      ) > 90
+    ){
+
+      addWall(
+        x,
+        y,
+        bw,
+        bh,
+        Math.random() < .35
+          ? 5
+          : 3
+      );
+
+    }
+
   }
+
+
+  Object.assign(
+    AI,
+    {
+
+      strategy:
+        'CHASE',
+
+      strategyUntil:
+        0,
+
+      confidence:
+        .72,
+
+      reason:
+        '追踪玩家并寻找射击角度。',
+
+      target:
+        null,
+
+      path:
+        [],
+
+      pathIndex:
+        0,
+
+      predicted: {
+        x: p.x,
+        y: p.y
+      },
+
+      threat:
+        null,
+
+      fireProbability:
+        .1,
+
+      danger:
+        0,
+
+      lastPlayer: {
+        x: p.x,
+        y: p.y,
+        t: performance.now()
+      },
+
+      playerVelocity: {
+        x: 0,
+        y: 0
+      },
+
+      stuckTime:
+        0,
+
+      lastPos: {
+        x: a.x,
+        y: a.y
+      },
+
+      lastT:
+        performance.now()
+
+    }
+  );
+
+
+  $('overlay')
+    .classList
+    .remove('show');
+
+
+  updateHud();
+
+
+  addLog(
+    'INIT',
+    '强AI模式：Jev 战略 + A*寻路 + 闪避 + 预判射击'
+  );
+
 }
-function applyDecision(d){decisionNo++;a.move=d.movement;$('strategy').textContent=d.strategy;$('strategyConf').style.width=Math.round(d.confidence*100)+'%';$('reason').textContent=d.reason;$('movement').textContent=d.movement;$('fire').textContent=Math.round(d.fireProbability*100)+'%';$('fireBar').style.width=Math.round(d.fireProbability*100)+'%';$('danger').textContent=Math.round(d.danger*100)+'%';$('dangerBar').style.width=Math.round(d.danger*100)+'%';$('decisionCount').textContent='#'+decisionNo;
-  $('moveProbs').innerHTML=names.map(n=>`<div class="prob"><span>${n}</span><div class="bar"><div class="fill" style="width:${Math.round(d.moveProbabilities[n]*100)}%"></div></div><b>${Math.round(d.moveProbabilities[n]*100)}%</b></div>`).join('');
-  if(Math.random()<d.fireProbability)aimAndShoot();addLog(d.strategy,`${d.movement} · fire ${Math.round(d.fireProbability*100)}% · danger ${Math.round(d.danger*100)}%`)
+
+
+/*
+ * ===========================
+ * 碰撞
+ * ===========================
+ */
+
+function rectCircle(
+  w,
+  t,
+  nx = t.x,
+  ny = t.y
+){
+
+  const cx =
+    clamp(
+      nx,
+      w.x,
+      w.x+w.w
+    );
+
+  const cy =
+    clamp(
+      ny,
+      w.y,
+      w.y+w.h
+    );
+
+
+  return (
+
+    (nx-cx)**2 +
+
+    (ny-cy)**2
+
+  ) < t.r**2;
+
 }
-function aimAndShoot(){const dx=p.x-a.x,dy=p.y-a.y;if(Math.abs(dx)<35)a.dir=dy>0?'DOWN':'UP';else if(Math.abs(dy)<35)a.dir=dx>0?'RIGHT':'LEFT';shoot(a,'a')}
-function addLog(tag,msg){const el=document.createElement('div');el.className='log';el.innerHTML=`<b>${tag}</b><span>${msg}</span>`;$('decisionLog').prepend(el);while($('decisionLog').children.length>7)$('decisionLog').lastChild.remove()}
-function playerInput(){if(keys.has('ArrowUp')||keys.has('KeyW'))return'UP';if(keys.has('ArrowDown')||keys.has('KeyS'))return'DOWN';if(keys.has('ArrowLeft')||keys.has('KeyA'))return'LEFT';if(keys.has('ArrowRight')||keys.has('KeyD'))return'RIGHT';return'STOP'}
-window.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.code==='Space')shoot(p,'p');if(e.code==='KeyR')reset()},{passive:false});window.addEventListener('keyup',e=>keys.delete(e.code));
-document.querySelectorAll('[data-k]').forEach(btn=>{const code=btn.dataset.k;const down=e=>{e.preventDefault();keys.add(code);if(code==='Space')shoot(p,'p')};const up=e=>{e.preventDefault();keys.delete(code)};btn.addEventListener('pointerdown',down);btn.addEventListener('pointerup',up);btn.addEventListener('pointercancel',up);btn.addEventListener('pointerleave',up)});
-$('restart').onclick=reset;$('newRound').onclick=reset;
-function grid(){ctx.fillStyle='#09111a';ctx.fillRect(0,0,W,H);ctx.strokeStyle='#172230';ctx.lineWidth=1;const s=32;for(let x=0;x<W;x+=s){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}for(let y=0;y<H;y+=s){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}ctx.fillStyle='#ffffff05';for(let i=0;i<40;i++){const x=(i*137)%W,y=(i*83)%H;ctx.fillRect(x,y,2,2)}}
-function drawWalls(){for(const w of walls){const alpha=.55+.45*w.hp/w.max;ctx.fillStyle=`rgba(174,116,64,${alpha})`;ctx.fillRect(w.x,w.y,w.w,w.h);ctx.strokeStyle='#e5b77b55';ctx.strokeRect(w.x+.5,w.y+.5,w.w-1,w.h-1);ctx.fillStyle='#090d12';for(let x=w.x+20;x<w.x+w.w;x+=24)ctx.fillRect(x,w.y,2,w.h);ctx.fillRect(w.x,w.y+w.h/2-1,w.w,2)}}
-function drawTank(t){ctx.save();ctx.translate(t.x,t.y);ctx.rotate(DIRS[t.dir].a);const c=t.flash>0?'#ffffff':t.color;ctx.fillStyle='#0008';ctx.fillRect(-20,-14,40,28);ctx.fillStyle=c;ctx.fillRect(-16,-13,32,26);ctx.fillStyle='#111820';ctx.fillRect(-20,-15,6,30);ctx.fillRect(14,-15,6,30);ctx.fillStyle=c;ctx.beginPath();ctx.arc(0,0,10,0,Math.PI*2);ctx.fill();ctx.fillRect(2,-3,28,6);ctx.fillStyle='#f3f6fa';ctx.font='bold 7px system-ui';ctx.textAlign='center';ctx.fillText(t.label,0,3);ctx.restore();ctx.strokeStyle=t.color+'55';ctx.beginPath();ctx.arc(t.x,t.y,24,0,Math.PI*2);ctx.stroke()}
-function drawBullets(){for(const b of bullets){ctx.fillStyle=b.owner==='p'?'#8ac6ff':'#ff949b';ctx.shadowBlur=13;ctx.shadowColor=ctx.fillStyle;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0}}
-function drawParticles(dt){for(let i=particles.length-1;i>=0;i--){const q=particles[i];q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=.96;q.vy*=.96;q.life-=dt;if(q.life<=0){particles.splice(i,1);continue}ctx.globalAlpha=clamp(q.life*2,0,1);ctx.fillStyle=q.c;ctx.fillRect(q.x,q.y,3,3)}ctx.globalAlpha=1}
-function loop(ts){const dt=Math.min(.033,(ts-last)/1000||.016);last=ts;if(!over){p.cool=Math.max(0,p.cool-dt);a.cool=Math.max(0,a.cool-dt);p.flash=Math.max(0,p.flash-dt);a.flash=Math.max(0,a.flash-dt);moveTank(p,playerInput(),dt);moveTank(a,a.move,dt);if(keys.has('Space'))shoot(p,'p');updateBullets(dt);aiTimer-=dt;if(aiTimer<=0){aiTimer=1.0;decide()}updateHud()}grid();drawWalls();drawBullets();drawTank(p);drawTank(a);drawParticles(dt);requestAnimationFrame(loop)}
-reset();requestAnimationFrame(loop);
+
+
+function canMove(
+  t,
+  nx,
+  ny
+){
+
+  if(
+    nx < t.r + 5
+    ||
+    nx > W - t.r - 5
+    ||
+    ny < t.r + 5
+    ||
+    ny > H - t.r - 5
+  ){
+
+    return false;
+
+  }
+
+
+  for(
+    const w
+    of walls
+  ){
+
+    if(
+      rectCircle(
+        w,
+        t,
+        nx,
+        ny
+      )
+    ){
+
+      return false;
+
+    }
+
+  }
+
+
+  return true;
+}
+
+
+/*
+ * ===========================
+ * 移动
+ * ===========================
+ */
+
+function moveTank(
+  t,
+  dir,
+  dt
+){
+
+  if(
+    dir === 'STOP'
+  ){
+
+    return;
+
+  }
+
+
+  const d =
+    DIRS[dir];
+
+
+  t.dir =
+    dir;
+
+
+  const nx =
+    t.x +
+    d.x *
+    t.speed *
+    dt;
+
+
+  const ny =
+    t.y +
+    d.y *
+    t.speed *
+    dt;
+
+
+  if(
+    canMove(
+      t,
+      nx,
+      ny
+    )
+  ){
+
+    t.x =
+      nx;
+
+    t.y =
+      ny;
+
+    return;
+
+  }
+
+
+  if(
+    canMove(
+      t,
+      nx,
+      t.y
+    )
+  ){
+
+    t.x =
+      nx;
+
+  }
+
+  else if(
+    canMove(
+      t,
+      t.x,
+      ny
+    )
+  ){
+
+    t.y =
+      ny;
+
+  }
+
+}
+
+
+/*
+ * ===========================
+ * 射击
+ * ===========================
+ */
+
+function shoot(
+  t,
+  owner
+){
+
+  if(
+    t.cool > 0
+    ||
+    over
+  ){
+
+    return;
+
+  }
+
+
+  const d =
+    DIRS[t.dir];
+
+
+  bullets.push({
+
+    x:
+      t.x +
+      d.x * 24,
+
+    y:
+      t.y +
+      d.y * 24,
+
+    vx:
+      d.x * 330,
+
+    vy:
+      d.y * 330,
+
+    r:
+      4,
+
+    owner,
+
+    life:
+      3
+
+  });
+
+
+  t.cool =
+    t.shotCooldown ||
+    .42;
+
+
+  t.flash =
+    .08;
+
+}
+
+
+function burst(
+  x,
+  y,
+  c,
+  n = 9
+){
+
+  for(
+    let i=0;
+    i<n;
+    i++
+  ){
+
+    particles.push({
+
+      x,
+      y,
+
+      vx:
+        rand(
+          -90,
+          90
+        ),
+
+      vy:
+        rand(
+          -90,
+          90
+        ),
+
+      life:
+        rand(
+          .25,
+          .65
+        ),
+
+      c
+
+    });
+
+  }
+
+}
+
+
+function hitTank(
+  b,
+  t
+){
+
+  return (
+
+    (b.x-t.x)**2 +
+
+    (b.y-t.y)**2
+
+  ) < (
+
+    b.r+t.r
+
+  )**2;
+
+}
+
+
+function updateBullets(
+  dt
+){
+
+  for(
+    let i=
+      bullets.length-1;
+
+    i>=0;
+
+    i--
+  ){
+
+    const b =
+      bullets[i];
+
+
+    b.x +=
+      b.vx * dt;
+
+    b.y +=
+      b.vy * dt;
+
+    b.life -=
+      dt;
+
+
+    let gone =
+      b.life <= 0
+      ||
+      b.x < 0
+      ||
+      b.y < 0
+      ||
+      b.x > W
+      ||
+      b.y > H;
+
+
+    /*
+     * 子弹打墙
+     */
+
+    for(
+      let j=
+        walls.length-1;
+
+      !gone && j>=0;
+
+      j--
+    ){
+
+      const w =
+        walls[j];
+
+
+      if(
+        b.x > w.x
+        &&
+        b.x < w.x+w.w
+        &&
+        b.y > w.y
+        &&
+        b.y < w.y+w.h
+      ){
+
+        w.hp--;
+
+
+        burst(
+          b.x,
+          b.y,
+          '#d5a566',
+          5
+        );
+
+
+        bullets.splice(
+          i,
+          1
+        );
+
+
+        gone =
+          true;
+
+
+        if(
+          w.hp <= 0
+        ){
+
+          burst(
+            w.x+w.w/2,
+            w.y+w.h/2,
+            '#c6894f',
+            15
+          );
+
+
+          walls.splice(
+            j,
+            1
+          );
+
+
+          pathTimer =
+            0;
+
+        }
+
+      }
+
+    }
+
+
+    if(
+      gone
+    ){
+
+      continue;
+
+    }
+
+
+    const target =
+      b.owner === 'p'
+        ? a
+        : p;
+
+
+    if(
+      hitTank(
+        b,
+        target
+      )
+    ){
+
+      target.hp--;
+
+
+      target.flash =
+        .18;
+
+
+      burst(
+
+        b.x,
+
+        b.y,
+
+        b.owner === 'p'
+          ? '#77bbff'
+          : '#ff8088',
+
+        13
+
+      );
+
+
+      bullets.splice(
+        i,
+        1
+      );
+
+
+      if(
+        target.hp <= 0
+      ){
+
+        endRound(
+          b.owner
+        );
+
+      }
+
+    }
+
+  }
+
+}
+
+
+/*
+ * ===========================
+ * 胜负
+ * ===========================
+ */
+
+function endRound(
+  winner
+){
+
+  over =
+    true;
+
+
+  if(
+    winner === 'p'
+  ){
+
+    playerScore++;
+
+
+    $('overTitle')
+      .textContent =
+      'YOU WIN';
+
+
+    $('overText')
+      .textContent =
+      '你击毁了 AI 坦克。';
+
+  }
+
+  else {
+
+    aiScore++;
+
+
+    $('overTitle')
+      .textContent =
+      'AI WINS';
+
+
+    $('overText')
+      .textContent =
+      '强 AI 完成击毁：Jev 负责战术，本地控制器负责实时执行。';
+
+  }
+
+
+  $('overlay')
+    .classList
+    .add('show');
+
+
+  updateHud();
+
+}
+
+
+function updateHud(){
+
+  $('pScore')
+    .textContent =
+    playerScore;
+
+
+  $('aScore')
+    .textContent =
+    aiScore;
+
+
+  $('pHp')
+    .textContent =
+
+    '♥'.repeat(
+      Math.max(
+        0,
+        p.hp
+      )
+    )
+
+    +
+
+    '♡'.repeat(
+      Math.max(
+        0,
+        3-p.hp
+      )
+    );
+
+
+  $('aHp')
+    .textContent =
+
+    '♥'.repeat(
+      Math.max(
+        0,
+        a.hp
+      )
+    )
+
+    +
+
+    '♡'.repeat(
+      Math.max(
+        0,
+        3-a.hp
+      )
+    );
+
+}
+
+
+/*
+ * ===========================
+ * 射线 / 视野
+ * ===========================
+ */
+
+function segmentHitsWall(
+  x1,
+  y1,
+  x2,
+  y2
+){
+
+  const steps =
+    Math.ceil(
+      Math.hypot(
+        x2-x1,
+        y2-y1
+      ) / 8
+    );
+
+
+  for(
+    let i=1;
+    i<steps;
+    i++
+  ){
+
+    const x =
+      x1 +
+      (x2-x1) *
+      i / steps;
+
+
+    const y =
+      y1 +
+      (y2-y1) *
+      i / steps;
+
+
+    for(
+      const w
+      of walls
+    ){
+
+      if(
+        x > w.x
+        &&
+        x < w.x+w.w
+        &&
+        y > w.y
+        &&
+        y < w.y+w.h
+      ){
+
+        return true;
+
+      }
+
+    }
+
+  }
+
+
+  return false;
+}
+
+
+function los(
+  from,
+  to
+){
+
+  return !segmentHitsWall(
+
+    from.x,
+
+    from.y,
+
+    to.x,
+
+    to.y
+
+  );
+
+}
+
+
+/*
+ * ===========================
+ * 玩家轨迹预测
+ * ===========================
+ */
+
+function updatePlayerVelocity(){
+
+  const now =
+    performance.now();
+
+
+  const dt =
+    Math.max(
+
+      .016,
+
+      (
+        now -
+        AI.lastPlayer.t
+      ) / 1000
+
+    );
+
+
+  const vx =
+    (
+      p.x -
+      AI.lastPlayer.x
+    ) / dt;
+
+
+  const vy =
+    (
+      p.y -
+      AI.lastPlayer.y
+    ) / dt;
+
+
+  /*
+   * 平滑速度
+   */
+
+  AI.playerVelocity.x =
+    AI.playerVelocity.x *
+    .65
+    +
+    vx *
+    .35;
+
+
+  AI.playerVelocity.y =
+    AI.playerVelocity.y *
+    .65
+    +
+    vy *
+    .35;
+
+
+  AI.lastPlayer = {
+
+    x:
+      p.x,
+
+    y:
+      p.y,
+
+    t:
+      now
+
+  };
+
+}
+
+
+function predictPlayer(){
+
+  const dist =
+    Math.hypot(
+
+      p.x-a.x,
+
+      p.y-a.y
+
+    );
+
+
+  /*
+   * 估算子弹飞行时间
+   */
+
+  const bulletTime =
+    clamp(
+
+      dist / 330,
+
+      .08,
+
+      .75
+
+    );
+
+
+  const px =
+    clamp(
+
+      p.x +
+      AI.playerVelocity.x *
+      bulletTime,
+
+      20,
+
+      W-20
+
+    );
+
+
+  const py =
+    clamp(
+
+      p.y +
+      AI.playerVelocity.y *
+      bulletTime,
+
+      20,
+
+      H-20
+
+    );
+
+
+  AI.predicted = {
+    x: px,
+    y: py
+  };
+
+
+  return AI.predicted;
+
+}
+
+
+/*
+ * ===========================
+ * 实时子弹威胁预测
+ * ===========================
+ */
+
+function bulletThreat(){
+
+  let best =
+    null;
+
+
+  for(
+    const b
+    of bullets
+  ){
+
+    if(
+      b.owner !== 'p'
+    ){
+
+      continue;
+
+    }
+
+
+    const speed2 =
+      b.vx*b.vx +
+      b.vy*b.vy;
+
+
+    if(
+      speed2 < 1
+    ){
+
+      continue;
+
+    }
+
+
+    const rx =
+      a.x-b.x;
+
+
+    const ry =
+      a.y-b.y;
+
+
+    /*
+     * 计算子弹与 AI
+     * 最近接触时间
+     */
+
+    let t =
+      (
+        rx*b.vx +
+        ry*b.vy
+      ) / speed2;
+
+
+    t =
+      clamp(
+        t,
+        0,
+        .85
+      );
+
+
+    const cx =
+      b.x +
+      b.vx*t;
+
+
+    const cy =
+      b.y +
+      b.vy*t;
+
+
+    const miss =
+      Math.hypot(
+
+        a.x-cx,
+
+        a.y-cy
+
+      );
+
+
+    if(
+      miss <
+      a.r + 15
+    ){
+
+      const score =
+
+        (.9-t)*2
+
+        +
+
+        (
+          a.r +
+          15 -
+          miss
+        ) / 30;
+
+
+      if(
+        !best
+        ||
+        score >
+        best.score
+      ){
+
+        best = {
+
+          b,
+
+          t,
+
+          miss,
+
+          score
+
+        };
+
+      }
+
+    }
+
+  }
+
+
+  AI.threat =
+    best;
+
+
+  AI.danger =
+    best
+
+      ? clamp(
+          1 -
+          best.t / .85,
+          0,
+          1
+        )
+
+      : 0;
+
+
+  return best;
+
+}
+
+
+/*
+ * ===========================
+ * 移动空间评分
+ * ===========================
+ */
+
+function clearanceScore(
+  dir
+){
+
+  const d =
+    DIRS[dir];
+
+
+  let score =
+    0;
+
+
+  for(
+    const step
+    of [
+      28,
+      52,
+      78,
+      104
+    ]
+  ){
+
+    if(
+      canMove(
+
+        a,
+
+        a.x +
+        d.x*step,
+
+        a.y +
+        d.y*step
+
+      )
+    ){
+
+      score++;
+
+    }
+
+    else {
+
+      break;
+
+    }
+
+  }
+
+
+  return score;
+
+}
+
+
+/*
+ * ===========================
+ * 自动躲子弹
+ * ===========================
+ */
+
+function chooseDodge(
+  threat
+){
+
+  if(
+    !threat
+  ){
+
+    return null;
+
+  }
+
+
+  const b =
+    threat.b;
+
+
+  /*
+   * 横向子弹 → 上下躲
+   * 纵向子弹 → 左右躲
+   */
+
+  const candidates =
+
+    Math.abs(b.vx) >
+    Math.abs(b.vy)
+
+      ? ['UP','DOWN']
+
+      : ['LEFT','RIGHT'];
+
+
+  let best =
+    'STOP';
+
+
+  let bestScore =
+    -1e9;
+
+
+  for(
+    const dir
+    of candidates
+  ){
+
+    const d =
+      DIRS[dir];
+
+
+    if(
+      !canMove(
+
+        a,
+
+        a.x +
+        d.x*42,
+
+        a.y +
+        d.y*42
+
+      )
+    ){
+
+      continue;
+
+    }
+
+
+    const futureX =
+      a.x +
+      d.x*55;
+
+
+    const futureY =
+      a.y +
+      d.y*55;
+
+
+    const bt =
+      clamp(
+        threat.t,
+        0,
+        .6
+      );
+
+
+    const bx =
+      b.x +
+      b.vx*bt;
+
+
+    const by =
+      b.y +
+      b.vy*bt;
+
+
+    const sep =
+      Math.hypot(
+
+        futureX-bx,
+
+        futureY-by
+
+      );
+
+
+    const score =
+
+      sep
+
+      +
+
+      clearanceScore(dir)
+      *
+      35;
+
+
+    if(
+      score >
+      bestScore
+    ){
+
+      bestScore =
+        score;
+
+
+      best =
+        dir;
+
+    }
+
+  }
+
+
+  return
+
+    best === 'STOP'
+
+      ? null
+
+      : best;
+
+}
+
+
+/*
+ * ===========================
+ * A* 寻路
+ * ===========================
+ */
+
+function nearestGrid(
+  x,
+  y,
+  cell
+){
+
+  return {
+
+    c:
+      Math.round(
+        x/cell
+      ),
+
+    r:
+      Math.round(
+        y/cell
+      )
+
+  };
+
+}
+
+
+function gridPos(
+  c,
+  r,
+  cell
+){
+
+  return {
+
+    x:
+      c*cell,
+
+    y:
+      r*cell
+
+  };
+
+}
+
+
+function isGridOpen(
+  c,
+  r,
+  cell
+){
+
+  const pos =
+    gridPos(
+      c,
+      r,
+      cell
+    );
+
+
+  return canMove(
+
+    a,
+
+    pos.x,
+
+    pos.y
+
+  );
+
+}
+
+
+function astar(
+  sx,
+  sy,
+  tx,
+  ty
+){
+
+  const cell =
+    32;
+
+
+  const s =
+    nearestGrid(
+      sx,
+      sy,
+      cell
+    );
+
+
+  const g =
+    nearestGrid(
+      tx,
+      ty,
+      cell
+    );
+
+
+  const key =
+    (c,r) =>
+      c+','+r;
+
+
+  const open = [{
+
+    c: s.c,
+
+    r: s.r,
+
+    g: 0,
+
+    f: 0
+
+  }];
+
+
+  const came =
+    new Map();
+
+
+  const cost =
+    new Map([
+
+      [
+        key(
+          s.c,
+          s.r
+        ),
+        0
+      ]
+
+    ]);
+
+
+  const maxC =
+    Math.floor(
+      W/cell
+    );
+
+
+  const maxR =
+    Math.floor(
+      H/cell
+    );
+
+
+  let guard =
+    0;
+
+
+  while(
+    open.length
+    &&
+    guard++ < 1200
+  ){
+
+    open.sort(
+      (u,v) =>
+        u.f-v.f
+    );
+
+
+    const cur =
+      open.shift();
+
+
+    if(
+      cur.c === g.c
+      &&
+      cur.r === g.r
+    ){
+
+      const out = [{
+
+        c: cur.c,
+
+        r: cur.r
+
+      }];
+
+
+      let k =
+        key(
+          cur.c,
+          cur.r
+        );
+
+
+      while(
+        came.has(k)
+      ){
+
+        const prev =
+          came.get(k);
+
+
+        out.push(
+          prev
+        );
+
+
+        k =
+          key(
+            prev.c,
+            prev.r
+          );
+
+      }
+
+
+      out.reverse();
+
+
+      return out.map(
+
+        n =>
+          gridPos(
+            n.c,
+            n.r,
+            cell
+          )
+
+      );
+
+    }
+
+
+    for(
+      const [dc,dr]
+      of [
+
+        [1,0],
+
+        [-1,0],
+
+        [0,1],
+
+        [0,-1]
+
+      ]
+    ){
+
+      const nc =
+        cur.c+dc;
+
+
+      const nr =
+        cur.r+dr;
+
+
+      if(
+        nc < 1
+        ||
+        nr < 1
+        ||
+        nc >= maxC
+        ||
+        nr >= maxR
+        ||
+        !isGridOpen(
+          nc,
+          nr,
+          cell
+        )
+      ){
+
+        continue;
+
+      }
+
+
+      const nk =
+        key(
+          nc,
+          nr
+        );
+
+
+      const ng =
+        cur.g+1;
+
+
+      if(
+        ng >=
+        (
+          cost.get(nk)
+          ??
+          1e9
+        )
+      ){
+
+        continue;
+
+      }
+
+
+      cost.set(
+        nk,
+        ng
+      );
+
+
+      came.set(
+        nk,
+        {
+          c:cur.c,
+          r:cur.r
+        }
+      );
+
+
+      const h =
+
+        Math.abs(
+          nc-g.c
+        )
+
+        +
+
+        Math.abs(
+          nr-g.r
+        );
+
+
+      open.push({
+
+        c:nc,
+
+        r:nr,
+
+        g:ng,
+
+        f:ng+h
+
+      });
+
+    }
+
+  }
+
+
+  return [];
+
+}
+
+
+/*
+ * ===========================
+ * 战术位置搜索
+ * ===========================
+ */
+
+function candidatePoints(){
+
+  const out =
+    [];
+
+
+  const step =
+    64;
+
+
+  for(
+    let x=48;
+    x<W-48;
+    x+=step
+  ){
+
+    for(
+      let y=48;
+      y<H-48;
+      y+=step
+    ){
+
+      if(
+        canMove(
+          a,
+          x,
+          y
+        )
+      ){
+
+        out.push({
+          x,
+          y
+        });
+
+      }
+
+    }
+
+  }
+
+
+  return out;
+
+}
+
+
+function coverScore(
+  pt
+){
+
+  let score =
+    0;
+
+
+  for(
+    const w
+    of walls
+  ){
+
+    const dx =
+      Math.max(
+
+        w.x-pt.x,
+
+        0,
+
+        pt.x -
+        (
+          w.x+w.w
+        )
+
+      );
+
+
+    const dy =
+      Math.max(
+
+        w.y-pt.y,
+
+        0,
+
+        pt.y -
+        (
+          w.y+w.h
+        )
+
+      );
+
+
+    const d =
+      Math.hypot(
+        dx,
+        dy
+      );
+
+
+    if(
+      d < 75
+    ){
+
+      score +=
+        (
+          75-d
+        ) / 75;
+
+    }
+
+  }
+
+
+  return score;
+
+}
+
+
+function alignmentScore(
+  pt,
+  target
+){
+
+  const ax =
+    Math.abs(
+      pt.x-target.x
+    );
+
+
+  const ay =
+    Math.abs(
+      pt.y-target.y
+    );
+
+
+  return Math.max(
+
+    0,
+
+    1 -
+    Math.min(
+      ax,
+      ay
+    ) / 70
+
+  );
+
+}
+
+
+function scorePoint(
+  pt,
+  strategy,
+  target
+){
+
+  const d =
+    Math.hypot(
+
+      pt.x-target.x,
+
+      pt.y-target.y
+
+    );
+
+
+  const clear =
+    !segmentHitsWall(
+
+      pt.x,
+
+      pt.y,
+
+      target.x,
+
+      target.y
+
+    );
+
+
+  const align =
+    alignmentScore(
+      pt,
+      target
+    );
+
+
+  const cover =
+    coverScore(
+      pt
+    );
+
+
+  let score =
+    0;
+
+
+  /*
+   * ATTACK
+   */
+
+  if(
+    strategy ===
+    'ATTACK'
+  ){
+
+    score +=
+      clear
+        ? 260
+        : -120;
+
+
+    score +=
+      align * 260;
+
+
+    score -=
+      Math.abs(
+        d-190
+      ) * .55;
+
+
+    score +=
+      cover * 30;
+
+  }
+
+
+  /*
+   * FLANK
+   */
+
+  else if(
+    strategy ===
+    'FLANK'
+  ){
+
+    score +=
+      clear
+        ? 180
+        : -40;
+
+
+    score +=
+      align * 210;
+
+
+    score -=
+      Math.abs(
+        d-220
+      ) * .35;
+
+
+    score +=
+      cover * 55;
+
+  }
+
+
+  /*
+   * RETREAT
+   */
+
+  else if(
+    strategy ===
+    'RETREAT'
+  ){
+
+    score +=
+      d * .55;
+
+
+    score +=
+      clear
+        ? -25
+        : 100;
+
+
+    score +=
+      cover * 80;
+
+  }
+
+
+  /*
+   * EVADE
+   */
+
+  else if(
+    strategy ===
+    'EVADE'
+  ){
+
+    score +=
+      d * .18;
+
+
+    score +=
+      cover * 90;
+
+
+    score +=
+      clear
+        ? -15
+        : 35;
+
+  }
+
+
+  /*
+   * CHASE
+   */
+
+  else {
+
+    score +=
+      clear
+        ? 120
+        : 10;
+
+
+    score +=
+      align * 130;
+
+
+    score -=
+      Math.abs(
+        d-170
+      ) * .4;
+
+  }
+
+
+  return score;
+
+}
+
+
+function chooseTacticalTarget(){
+
+  const target =
+    predictPlayer();
+
+
+  const pts =
+    candidatePoints();
+
+
+  let best = {
+    x:a.x,
+    y:a.y
+  };
+
+
+  let bestScore =
+    -1e9;
+
+
+  for(
+    const pt
+    of pts
+  ){
+
+    const score =
+      scorePoint(
+
+        pt,
+
+        AI.strategy,
+
+        target
+
+      );
+
+
+    if(
+      score >
+      bestScore
+    ){
+
+      bestScore =
+        score;
+
+
+      best =
+        pt;
+
+    }
+
+  }
+
+
+  return best;
+
+}
+
+
+function planPath(
+  force = false
+){
+
+  if(
+    !force
+    &&
+    pathTimer > 0
+  ){
+
+    return;
+
+  }
+
+
+  pathTimer =
+    .45;
+
+
+  AI.target =
+    chooseTacticalTarget();
+
+
+  AI.path =
+    astar(
+
+      a.x,
+
+      a.y,
+
+      AI.target.x,
+
+      AI.target.y
+
+    );
+
+
+  AI.pathIndex =
+    Math.min(
+
+      1,
+
+      Math.max(
+
+        0,
+
+        AI.path.length-1
+
+      )
+
+    );
+
+}
+
+
+function followPath(){
+
+  if(
+    !AI.path.length
+  ){
+
+    return 'STOP';
+
+  }
+
+
+  while(
+    AI.pathIndex <
+    AI.path.length
+  ){
+
+    const node =
+      AI.path[
+        AI.pathIndex
+      ];
+
+
+    if(
+      Math.hypot(
+
+        node.x-a.x,
+
+        node.y-a.y
+
+      ) < 18
+    ){
+
+      AI.pathIndex++;
+
+    }
+
+    else {
+
+      break;
+
+    }
+
+  }
+
+
+  if(
+    AI.pathIndex >=
+    AI.path.length
+  ){
+
+    return 'STOP';
+
+  }
+
+
+  const node =
+    AI.path[
+      AI.pathIndex
+    ];
+
+
+  const dx =
+    node.x-a.x;
+
+
+  const dy =
+    node.y-a.y;
+
+
+  if(
+    Math.abs(dx) >
+    Math.abs(dy)
+  ){
+
+    const dir =
+      dx > 0
+        ? 'RIGHT'
+        : 'LEFT';
+
+
+    if(
+      clearanceScore(dir) > 0
+    ){
+
+      return dir;
+
+    }
+
+  }
+
+
+  const dir =
+    dy > 0
+      ? 'DOWN'
+      : 'UP';
+
+
+  if(
+    clearanceScore(dir) > 0
+  ){
+
+    return dir;
+
+  }
+
+
+  const alt =
+    dx > 0
+      ? 'RIGHT'
+      : 'LEFT';
+
+
+  return
+
+    clearanceScore(alt) > 0
+
+      ? alt
+
+      : 'STOP';
+
+}
+
+
+/*
+ * ===========================
+ * 预判射击
+ * ===========================
+ */
+
+function aimSolution(){
+
+  const pred =
+    predictPlayer();
+
+
+  const dx =
+    pred.x-a.x;
+
+
+  const dy =
+    pred.y-a.y;
+
+
+  const ax =
+    Math.abs(dx);
+
+
+  const ay =
+    Math.abs(dy);
+
+
+  let dir =
+    null;
+
+
+  let quality =
+    0;
+
+
+  /*
+   * 纵向射击窗口
+   */
+
+  if(
+    ax < 44
+  ){
+
+    dir =
+      dy > 0
+        ? 'DOWN'
+        : 'UP';
+
+
+    quality =
+      1 -
+      ax/44;
+
+  }
+
+
+  /*
+   * 横向射击窗口
+   */
+
+  if(
+    ay < 44
+  ){
+
+    const q =
+      1 -
+      ay/44;
+
+
+    if(
+      q >
+      quality
+    ){
+
+      dir =
+        dx > 0
+          ? 'RIGHT'
+          : 'LEFT';
+
+
+      quality =
+        q;
+
+    }
+
+  }
+
+
+  if(
+    !dir
+  ){
+
+    return null;
+
+  }
+
+
+  if(
+    !los(
+      a,
+      pred
+    )
+  ){
+
+    return null;
+
+  }
+
+
+  return {
+
+    dir,
+
+    quality,
+
+    dist:
+      Math.hypot(
+        dx,
+        dy
+      )
+
+  };
+
+}
+
+
+/*
+ * ===========================
+ * 本地实时战斗 AI
+ * ===========================
+ */
+
+function localCombatControl(){
+
+  updatePlayerVelocity();
+
+
+  /*
+   * 1. 优先躲子弹
+   */
+
+  const threat =
+    bulletThreat();
+
+
+  const dodge =
+    chooseDodge(
+      threat
+    );
+
+
+  if(
+    dodge
+  ){
+
+    a.move =
+      dodge;
+
+
+    AI.fireProbability =
+      .03;
+
+
+    AI.reason =
+      '检测到高危弹道，立即闪避。';
+
+
+    return;
+
+  }
+
+
+  /*
+   * 2. 寻找射击窗口
+   */
+
+  const shot =
+    aimSolution();
+
+
+  if(
+    shot
+  ){
+
+    a.dir =
+      shot.dir;
+
+
+    AI.fireProbability =
+      clamp(
+
+        .62 +
+        shot.quality *
+        .36,
+
+        0,
+
+        1
+
+      );
+
+
+    /*
+     * AI 不等 Jev 决定开火
+     * 出现窗口立即射击
+     */
+
+    if(
+      a.cool <= 0
+    ){
+
+      shoot(
+        a,
+        'a'
+      );
+
+    }
+
+
+    /*
+     * 近距离射击时
+     * 暂停移动提升命中
+     */
+
+    if(
+      AI.strategy !==
+      'RETREAT'
+    ){
+
+      a.move =
+
+        shot.dist < 135
+
+          ? 'STOP'
+
+          : followPath();
+
+    }
+
+
+    return;
+
+  }
+
+
+  /*
+   * 3. 无射击机会
+   * 继续寻路到战术位置
+   */
+
+  planPath();
+
+
+  a.move =
+    followPath();
+
+
+  AI.fireProbability =
+    .08;
+
+}
+
+
+/*
+ * ===========================
+ * 发送给 Jev 的状态
+ * ===========================
+ */
+
+function buildJevState(){
+
+  const dx =
+    p.x-a.x;
+
+
+  const dy =
+    p.y-a.y;
+
+
+  const threat =
+    bulletThreat();
+
+
+  return {
+
+    arena: {
+
+      width:
+        Math.round(W),
+
+      height:
+        Math.round(H)
+
+    },
+
+
+    ai: {
+
+      x:
+        Math.round(a.x),
+
+      y:
+        Math.round(a.y),
+
+      direction:
+        a.dir,
+
+      hp:
+        a.hp,
+
+      shotReady:
+        a.cool <= 0
+
+    },
+
+
+    player: {
+
+      x:
+        Math.round(p.x),
+
+      y:
+        Math.round(p.y),
+
+      direction:
+        p.dir,
+
+      hp:
+        p.hp,
+
+      velocityX:
+        Math.round(
+          AI.playerVelocity.x
+        ),
+
+      velocityY:
+        Math.round(
+          AI.playerVelocity.y
+        )
+
+    },
+
+
+    geometry: {
+
+      dx:
+        Math.round(dx),
+
+      dy:
+        Math.round(dy),
+
+      distance:
+        Math.round(
+          Math.hypot(
+            dx,
+            dy
+          )
+        ),
+
+      lineOfSight:
+        los(a,p),
+
+      alignedX:
+        Math.abs(dx) < 44,
+
+      alignedY:
+        Math.abs(dy) < 44
+
+    },
+
+
+    danger: {
+
+      incomingBullet:
+        !!threat,
+
+      timeToClosestApproach:
+
+        threat
+
+          ? Number(
+              threat.t.toFixed(2)
+            )
+
+          : null,
+
+      dangerScore:
+
+        Number(
+          AI.danger.toFixed(2)
+        )
+
+    },
+
+
+    currentStrategy:
+      AI.strategy,
+
+
+    walls:
+
+      walls
+        .slice(0,14)
+        .map(
+          w => ({
+
+            x:
+              Math.round(w.x),
+
+            y:
+              Math.round(w.y),
+
+            w:
+              Math.round(w.w),
+
+            h:
+              Math.round(w.h),
+
+            hp:
+              w.hp
+
+          })
+        )
+
+  };
+
+}
+
+
+/*
+ * ===========================
+ * 解析 Jev
+ * ===========================
+ */
+
+function mapJevResponse(
+  raw
+){
+
+  const root =
+
+    raw &&
+    raw.result
+
+      ? raw.result
+
+      : raw;
+
+
+  const ans =
+    root &&
+    root.answers;
+
+
+  if(
+    !ans
+    ||
+    !ans.strategy
+  ){
+
+    throw new Error(
+      'Invalid Jev response'
+    );
+
+  }
+
+
+  return {
+
+    strategy:
+      ans.strategy.choice
+      ||
+      'CHASE',
+
+    confidence:
+      Number(
+        ans.strategy.confidence
+        ||
+        .5
+      ),
+
+    model:
+      root.model
+      ||
+      'typesafe/jev'
+
+  };
+
+}
+
+
+/*
+ * ===========================
+ * Jev 战略脑
+ * ===========================
+ */
+
+async function decideStrategy(){
+
+  if(
+    jevInFlight
+    ||
+    Date.now() <
+    jevRetryAt
+  ){
+
+    return;
+
+  }
+
+
+  const now =
+    performance.now();
+
+
+  /*
+   * 战术至少保持 2.6 秒
+   *
+   * 避免：
+   * CHASE
+   * FLANK
+   * CHASE
+   * ATTACK
+   *
+   * 不断抖动
+   */
+
+  if(
+    now <
+    AI.strategyUntil
+    &&
+    AI.danger < .75
+  ){
+
+    return;
+
+  }
+
+
+  jevInFlight =
+    true;
+
+
+  try {
+
+    const res =
+      await fetch(
+
+        '/api/jev',
+
+        {
+
+          method:
+            'POST',
+
+          headers: {
+
+            'content-type':
+              'application/json'
+
+          },
+
+          body:
+            JSON.stringify({
+
+              state:
+                buildJevState()
+
+            })
+
+        }
+
+      );
+
+
+    if(
+      !res.ok
+    ){
+
+      throw new Error(
+        'Jev API ' +
+        res.status
+      );
+
+    }
+
+
+    const raw =
+      await res.json();
+
+
+    const d =
+      mapJevResponse(
+        raw
+      );
+
+
+    AI.strategy =
+      d.strategy;
+
+
+    AI.confidence =
+      d.confidence;
+
+
+    AI.strategyUntil =
+      performance.now()
+      +
+      2600;
+
+
+    AI.reason = {
+
+      ATTACK:
+        'Jev 选择压制攻击，本地 AI 寻找最短射击窗口。',
+
+      CHASE:
+        'Jev 选择追击，本地 AI 持续逼近并抢射击角。',
+
+      EVADE:
+        'Jev 选择规避，本地 AI 优先躲弹并转移位置。',
+
+      FLANK:
+        'Jev 选择绕侧翼，本地 AI 寻找侧向火线。',
+
+      RETREAT:
+        'Jev 选择拉开距离，同时保持反击能力。'
+
+    }[
+      AI.strategy
+    ]
+
+    ||
+
+    'Jev 已更新战术。';
+
+
+    pathTimer =
+      0;
+
+
+    jevFailures =
+      0;
+
+
+    jevRetryAt =
+      0;
+
+
+    $('modelStatus')
+      .textContent =
+
+      (
+        d.model
+        ||
+        'typesafe/jev'
+      )
+      .toUpperCase()
+
+      +
+
+      ' · LIVE';
+
+
+    $('engineChip')
+      .textContent =
+      'JEV + TACTICAL AI';
+
+
+    addLog(
+
+      'JEV',
+
+      AI.strategy
+
+      +
+
+      ' · conf '
+
+      +
+
+      Math.round(
+        AI.confidence*100
+      )
+
+      +
+
+      '%'
+
+    );
+
+  }
+
+  catch(err){
+
+    jevFailures++;
+
+
+    /*
+     * 即使 Jev 断网
+     * 本地 AI 仍然能作战
+     */
+
+    AI.strategy =
+
+      AI.danger > .55
+
+        ? 'EVADE'
+
+        : 'CHASE';
+
+
+    AI.strategyUntil =
+      performance.now()
+      +
+      1600;
+
+
+    if(
+      String(err)
+      .includes('503')
+    ){
+
+      jevRetryAt =
+        Date.now()
+        +
+        30000;
+
+    }
+
+
+    $('modelStatus')
+      .textContent =
+
+      'LOCAL FALLBACK · '
+
+      +
+
+      (
+        jevFailures > 1
+
+          ? 'API UNAVAILABLE'
+
+          : 'RETRYING'
+      );
+
+
+    $('engineChip')
+      .textContent =
+      'TACTICAL FALLBACK';
+
+  }
+
+  finally {
+
+    jevInFlight =
+      false;
+
+  }
+
+}
+
+
+/*
+ * ===========================
+ * 高频战术控制
+ * ===========================
+ */
+
+function tacticalTick(){
+
+  localCombatControl();
+
+
+  /*
+   * 卡墙检测
+   */
+
+  const now =
+    performance.now();
+
+
+  const moved =
+    Math.hypot(
+
+      a.x -
+      AI.lastPos.x,
+
+      a.y -
+      AI.lastPos.y
+
+    );
+
+
+  const dt =
+    (
+      now -
+      AI.lastT
+    ) / 1000;
+
+
+  if(
+    dt > .45
+  ){
+
+    if(
+      moved < 6
+      &&
+      a.move !==
+      'STOP'
+    ){
+
+      AI.stuckTime +=
+        dt;
+
+    }
+
+    else {
+
+      AI.stuckTime =
+        0;
+
+    }
+
+
+    AI.lastPos = {
+
+      x:a.x,
+
+      y:a.y
+
+    };
+
+
+    AI.lastT =
+      now;
+
+
+    if(
+      AI.stuckTime >
+      .7
+    ){
+
+      pathTimer =
+        0;
+
+
+      AI.path =
+        [];
+
+
+      const options =
+
+        names.filter(
+
+          n =>
+
+            n !==
+            'STOP'
+
+            &&
+
+            clearanceScore(n)
+            >=
+            2
+
+        );
+
+
+      if(
+        options.length
+      ){
+
+        a.move =
+
+          options[
+
+            Math.floor(
+
+              Math.random()
+              *
+              options.length
+
+            )
+
+          ];
+
+      }
+
+
+      AI.stuckTime =
+        0;
+
+    }
+
+  }
+
+
+  updateDecisionUI();
+
+}
+
+
+/*
+ * ===========================
+ * AI 面板
+ * ===========================
+ */
+
+function updateDecisionUI(){
+
+  decisionNo++;
+
+
+  $('strategy')
+    .textContent =
+    AI.strategy;
+
+
+  $('strategyConf')
+    .style.width =
+
+    Math.round(
+      AI.confidence*100
+    )
+
+    +
+
+    '%';
+
+
+  $('reason')
+    .textContent =
+    AI.reason;
+
+
+  $('movement')
+    .textContent =
+    a.move;
+
+
+  $('fire')
+    .textContent =
+
+    Math.round(
+      AI.fireProbability*100
+    )
+
+    +
+
+    '%';
+
+
+  $('fireBar')
+    .style.width =
+
+    Math.round(
+      AI.fireProbability*100
+    )
+
+    +
+
+    '%';
+
+
+  $('danger')
+    .textContent =
+
+    Math.round(
+      AI.danger*100
+    )
+
+    +
+
+    '%';
+
+
+  $('dangerBar')
+    .style.width =
+
+    Math.round(
+      AI.danger*100
+    )
+
+    +
+
+    '%';
+
+
+  $('decisionCount')
+    .textContent =
+    '#'+
+    decisionNo;
+
+
+  const probs = {
+
+    UP:.04,
+
+    DOWN:.04,
+
+    LEFT:.04,
+
+    RIGHT:.04,
+
+    STOP:.04
+
+  };
+
+
+  probs[
+    a.move
+  ] = .84;
+
+
+  $('moveProbs')
+    .innerHTML =
+
+    names
+    .map(
+
+      n => `
+
+      <div class="prob">
+
+        <span>${n}</span>
+
+        <div class="bar">
+
+          <div
+            class="fill"
+            style="width:${Math.round(probs[n]*100)}%"
+          ></div>
+
+        </div>
+
+        <b>
+          ${Math.round(probs[n]*100)}%
+        </b>
+
+      </div>
+
+      `
+
+    )
+    .join('');
+
+}
+
+
+/*
+ * ===========================
+ * 日志
+ * ===========================
+ */
+
+function addLog(
+  tag,
+  msg
+){
+
+  const el =
+    document
+    .createElement(
+      'div'
+    );
+
+
+  el.className =
+    'log';
+
+
+  el.innerHTML =
+
+    `<b>${tag}</b>
+     <span>${msg}</span>`;
+
+
+  $('decisionLog')
+    .prepend(
+      el
+    );
+
+
+  while(
+    $('decisionLog')
+    .children
+    .length > 7
+  ){
+
+    $('decisionLog')
+      .lastChild
+      .remove();
+
+  }
+
+}
+
+
+/*
+ * ===========================
+ * 玩家输入
+ * ===========================
+ */
+
+function playerInput(){
+
+  if(
+    keys.has(
+      'ArrowUp'
+    )
+    ||
+    keys.has(
+      'KeyW'
+    )
+  ){
+
+    return 'UP';
+
+  }
+
+
+  if(
+    keys.has(
+      'ArrowDown'
+    )
+    ||
+    keys.has(
+      'KeyS'
+    )
+  ){
+
+    return 'DOWN';
+
+  }
+
+
+  if(
+    keys.has(
+      'ArrowLeft'
+    )
+    ||
+    keys.has(
+      'KeyA'
+    )
+  ){
+
+    return 'LEFT';
+
+  }
+
+
+  if(
+    keys.has(
+      'ArrowRight'
+    )
+    ||
+    keys.has(
+      'KeyD'
+    )
+  ){
+
+    return 'RIGHT';
+
+  }
+
+
+  return 'STOP';
+
+}
+
+
+window.addEventListener(
+
+  'keydown',
+
+  e => {
+
+    if(
+      [
+        'ArrowUp',
+        'ArrowDown',
+        'ArrowLeft',
+        'ArrowRight',
+        'Space'
+      ]
+      .includes(
+        e.code
+      )
+    ){
+
+      e.preventDefault();
+
+    }
+
+
+    keys.add(
+      e.code
+    );
+
+
+    if(
+      e.code ===
+      'Space'
+    ){
+
+      shoot(
+        p,
+        'p'
+      );
+
+    }
+
+
+    if(
+      e.code ===
+      'KeyR'
+    ){
+
+      reset();
+
+    }
+
+  },
+
+  {
+    passive:false
+  }
+
+);
+
+
+window.addEventListener(
+
+  'keyup',
+
+  e =>
+    keys.delete(
+      e.code
+    )
+
+);
+
+
+document
+.querySelectorAll(
+  '[data-k]'
+)
+.forEach(
+
+  btn => {
+
+    const code =
+      btn.dataset.k;
+
+
+    const down =
+      e => {
+
+        e.preventDefault();
+
+
+        keys.add(
+          code
+        );
+
+
+        if(
+          code ===
+          'Space'
+        ){
+
+          shoot(
+            p,
+            'p'
+          );
+
+        }
+
+      };
+
+
+    const up =
+      e => {
+
+        e.preventDefault();
+
+
+        keys.delete(
+          code
+        );
+
+      };
+
+
+    btn.addEventListener(
+      'pointerdown',
+      down
+    );
+
+
+    btn.addEventListener(
+      'pointerup',
+      up
+    );
+
+
+    btn.addEventListener(
+      'pointercancel',
+      up
+    );
+
+
+    btn.addEventListener(
+      'pointerleave',
+      up
+    );
+
+  }
+
+);
+
+
+$('restart')
+  .onclick =
+  reset;
+
+
+$('newRound')
+  .onclick =
+  reset;
+
+
+/*
+ * ===========================
+ * 渲染
+ * ===========================
+ */
+
+function grid(){
+
+  ctx.fillStyle =
+    '#09111a';
+
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+
+  ctx.strokeStyle =
+    '#172230';
+
+
+  ctx.lineWidth =
+    1;
+
+
+  const s =
+    32;
+
+
+  for(
+    let x=0;
+    x<W;
+    x+=s
+  ){
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x,
+      0
+    );
+
+    ctx.lineTo(
+      x,
+      H
+    );
+
+    ctx.stroke();
+
+  }
+
+
+  for(
+    let y=0;
+    y<H;
+    y+=s
+  ){
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      0,
+      y
+    );
+
+    ctx.lineTo(
+      W,
+      y
+    );
+
+    ctx.stroke();
+
+  }
+
+}
+
+
+function drawWalls(){
+
+  for(
+    const w
+    of walls
+  ){
+
+    const alpha =
+      .55
+      +
+      .45 *
+      w.hp /
+      w.max;
+
+
+    ctx.fillStyle =
+      `rgba(174,116,64,${alpha})`;
+
+
+    ctx.fillRect(
+
+      w.x,
+
+      w.y,
+
+      w.w,
+
+      w.h
+
+    );
+
+
+    ctx.strokeStyle =
+      '#e5b77b55';
+
+
+    ctx.strokeRect(
+
+      w.x+.5,
+
+      w.y+.5,
+
+      w.w-1,
+
+      w.h-1
+
+    );
+
+
+    ctx.fillStyle =
+      '#090d12';
+
+
+    for(
+      let x=
+        w.x+20;
+
+      x<
+        w.x+w.w;
+
+      x+=24
+    ){
+
+      ctx.fillRect(
+
+        x,
+
+        w.y,
+
+        2,
+
+        w.h
+
+      );
+
+    }
+
+
+    ctx.fillRect(
+
+      w.x,
+
+      w.y+w.h/2-1,
+
+      w.w,
+
+      2
+
+    );
+
+  }
+
+}
+
+
+function drawTank(
+  t
+){
+
+  ctx.save();
+
+
+  ctx.translate(
+    t.x,
+    t.y
+  );
+
+
+  ctx.rotate(
+    DIRS[
+      t.dir
+    ].a
+  );
+
+
+  const c =
+    t.flash > 0
+
+      ? '#ffffff'
+
+      : t.color;
+
+
+  ctx.fillStyle =
+    '#0008';
+
+
+  ctx.fillRect(
+    -20,
+    -14,
+    40,
+    28
+  );
+
+
+  ctx.fillStyle =
+    c;
+
+
+  ctx.fillRect(
+    -16,
+    -13,
+    32,
+    26
+  );
+
+
+  ctx.fillStyle =
+    '#111820';
+
+
+  ctx.fillRect(
+    -20,
+    -15,
+    6,
+    30
+  );
+
+
+  ctx.fillRect(
+    14,
+    -15,
+    6,
+    30
+  );
+
+
+  ctx.fillStyle =
+    c;
+
+
+  ctx.beginPath();
+
+
+  ctx.arc(
+    0,
+    0,
+    10,
+    0,
+    Math.PI*2
+  );
+
+
+  ctx.fill();
+
+
+  ctx.fillRect(
+    2,
+    -3,
+    28,
+    6
+  );
+
+
+  ctx.fillStyle =
+    '#f3f6fa';
+
+
+  ctx.font =
+    'bold 7px system-ui';
+
+
+  ctx.textAlign =
+    'center';
+
+
+  ctx.fillText(
+    t.label,
+    0,
+    3
+  );
+
+
+  ctx.restore();
+
+
+  ctx.strokeStyle =
+    t.color +
+    '55';
+
+
+  ctx.beginPath();
+
+
+  ctx.arc(
+    t.x,
+    t.y,
+    24,
+    0,
+    Math.PI*2
+  );
+
+
+  ctx.stroke();
+
+}
+
+
+function drawBullets(){
+
+  for(
+    const b
+    of bullets
+  ){
+
+    ctx.fillStyle =
+
+      b.owner === 'p'
+
+        ? '#8ac6ff'
+
+        : '#ff949b';
+
+
+    ctx.shadowBlur =
+      13;
+
+
+    ctx.shadowColor =
+      ctx.fillStyle;
+
+
+    ctx.beginPath();
+
+
+    ctx.arc(
+
+      b.x,
+
+      b.y,
+
+      b.r,
+
+      0,
+
+      Math.PI*2
+
+    );
+
+
+    ctx.fill();
+
+
+    ctx.shadowBlur =
+      0;
+
+  }
+
+}
+
+
+function drawParticles(
+  dt
+){
+
+  for(
+    let i=
+      particles.length-1;
+
+    i>=0;
+
+    i--
+  ){
+
+    const q =
+      particles[i];
+
+
+    q.x +=
+      q.vx*dt;
+
+
+    q.y +=
+      q.vy*dt;
+
+
+    q.vx *=
+      .96;
+
+
+    q.vy *=
+      .96;
+
+
+    q.life -=
+      dt;
+
+
+    if(
+      q.life <= 0
+    ){
+
+      particles.splice(
+        i,
+        1
+      );
+
+
+      continue;
+
+    }
+
+
+    ctx.globalAlpha =
+      clamp(
+
+        q.life*2,
+
+        0,
+
+        1
+
+      );
+
+
+    ctx.fillStyle =
+      q.c;
+
+
+    ctx.fillRect(
+
+      q.x,
+
+      q.y,
+
+      3,
+
+      3
+
+    );
+
+  }
+
+
+  ctx.globalAlpha =
+    1;
+
+}
+
+
+/*
+ * ===========================
+ * 游戏主循环
+ * ===========================
+ */
+
+function loop(
+  ts
+){
+
+  const dt =
+
+    Math.min(
+
+      .033,
+
+      (
+        ts-last
+      ) / 1000
+
+      ||
+
+      .016
+
+    );
+
+
+  last =
+    ts;
+
+
+  if(
+    !over
+  ){
+
+    p.cool =
+      Math.max(
+        0,
+        p.cool-dt
+      );
+
+
+    a.cool =
+      Math.max(
+        0,
+        a.cool-dt
+      );
+
+
+    p.flash =
+      Math.max(
+        0,
+        p.flash-dt
+      );
+
+
+    a.flash =
+      Math.max(
+        0,
+        a.flash-dt
+      );
+
+
+    moveTank(
+
+      p,
+
+      playerInput(),
+
+      dt
+
+    );
+
+
+    moveTank(
+
+      a,
+
+      a.move,
+
+      dt
+
+    );
+
+
+    if(
+      keys.has(
+        'Space'
+      )
+    ){
+
+      shoot(
+        p,
+        'p'
+      );
+
+    }
+
+
+    updateBullets(
+      dt
+    );
+
+
+    aiDecisionTimer -=
+      dt;
+
+
+    tacticalTimer -=
+      dt;
+
+
+    pathTimer -=
+      dt;
+
+
+    /*
+     * Jev
+     *
+     * 每 2.2 秒
+     * 做一次高层战略判断
+     */
+
+    if(
+      aiDecisionTimer <= 0
+    ){
+
+      aiDecisionTimer =
+        2.2;
+
+
+      decideStrategy();
+
+    }
+
+
+    /*
+     * 本地强 AI
+     *
+     * 每 80ms
+     *
+     * 躲弹
+     * 寻路
+     * 预判
+     * 瞄准
+     * 射击
+     */
+
+    if(
+      tacticalTimer <= 0
+    ){
+
+      tacticalTimer =
+        .08;
+
+
+      tacticalTick();
+
+    }
+
+
+    updateHud();
+
+  }
+
+
+  grid();
+
+  drawWalls();
+
+  drawBullets();
+
+  drawTank(
+    p
+  );
+
+  drawTank(
+    a
+  );
+
+  drawParticles(
+    dt
+  );
+
+
+  requestAnimationFrame(
+    loop
+  );
+
+}
+
+
+reset();
+
+requestAnimationFrame(
+  loop
+);
+
 })();
 </script>
 </body>
