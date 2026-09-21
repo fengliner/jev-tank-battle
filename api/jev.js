@@ -2,7 +2,7 @@ const QUESTIONS = {
   strategy: {
     type: 'choice',
     instructions:
-      'Choose the best high-level tactic for the AI tank for the next 0.5 seconds. Prioritize survival, then useful pressure on the player.',
+  'Your primary objective is to defeat the player as quickly as possible. Prefer ATTACK or CHASE whenever there is a credible kill opportunity. Use FLANK to create a firing lane or cut off the player. Use EVADE only for an imminent projectile threat. Use RETREAT only when survival is immediately threatened. Avoid passive play and continuously create kill pressure.',
     criteria: {
       ATTACK: 'Use a clear firing line or immediate offensive opportunity',
       CHASE: 'Close distance or improve position toward the player',
