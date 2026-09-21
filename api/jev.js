@@ -1,3 +1,4 @@
+
 const QUESTIONS = {
   strategy: {
     type: 'choice',
@@ -50,8 +51,22 @@ const QUESTIONS = {
 };
 
 export default async function handler(req, res) {
+  // 浏览器直接打开 /api/jev 时，用 GET 做安全诊断
+  // 不会返回你的真实 Account ID 或 Token
+  if (req.method === 'GET') {
+    return res.status(200).json({
+      ok: true,
+      endpoint: '/api/jev',
+      accountIdConfigured: !!process.env.CLOUDFLARE_ACCOUNT_ID,
+      tokenConfigured: !!process.env.CLOUDFLARE_API_TOKEN,
+      model: 'typesafe/jev'
+    });
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'POST only' });
+    return res.status(405).json({
+      error: 'POST only'
+    });
   }
 
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -59,7 +74,9 @@ export default async function handler(req, res) {
 
   if (!accountId || !token) {
     return res.status(503).json({
-      error: 'Jev credentials are not configured'
+      error: 'Jev credentials are not configured',
+      accountIdConfigured: !!accountId,
+      tokenConfigured: !!token
     });
   }
 
@@ -69,11 +86,17 @@ export default async function handler(req, res) {
         ? req.body.state
         : req.body;
 
+    if (!state || typeof state !== 'object') {
+      return res.status(400).json({
+        error: 'Missing or invalid game state'
+      });
+    }
+
     const controller = new AbortController();
 
     const timeout = setTimeout(() => {
       controller.abort();
-    }, 4500);
+    }, 6000);
 
     const response = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run`,
@@ -100,11 +123,21 @@ export default async function handler(req, res) {
 
     clearTimeout(timeout);
 
-    const data = await response.json();
+    let data;
+
+    try {
+      data = await response.json();
+    } catch {
+      data = {
+        success: false,
+        error: 'Cloudflare returned a non-JSON response'
+      };
+    }
 
     if (!response.ok || data.success === false) {
       return res.status(response.status || 502).json({
         error: 'Cloudflare Jev request failed',
+        cloudflareStatus: response.status,
         details: data
       });
     }
@@ -116,9 +149,16 @@ export default async function handler(req, res) {
     return res.status(200).json(result);
 
   } catch (error) {
-    return res.status(500).json({
-      error: 'Jev proxy failed',
-      message: String(error?.message || error)
+    const isAbort = error?.name === 'AbortError';
+
+    return res.status(isAbort ? 504 : 500).json({
+      error: isAbort
+        ? 'Jev request timed out'
+        : 'Jev proxy failed',
+
+      message: String(
+        error?.message || error
+      )
     });
   }
 }
