@@ -11,7 +11,7 @@ assert.equal(sources.length, 9);
 const inspect = `() => JSON.stringify({W,H,p,a,over,playerScore,aiScore,AI,walls,bullets,particles,
   jevTimer,tacticalTimer,pathTimer,uiTimer,jevInFlight,jevFailures,jevRetryAt,frameErrors,keys:[...keys]})`;
 
-function boot(baseline, response) {
+function boot(baseline, response, size = { width: 900, height: 620 }) {
   let now = 0, seed = 42, frame;
   const errors = [], requests = [], elements = new Map();
   function element() {
@@ -23,7 +23,7 @@ function boot(baseline, response) {
       emit(name, code) { events.get(name)?.({ code, preventDefault() {} }); },
       prepend(el) { this.children.unshift(el); el.remove = () => this.children.pop(); },
       get lastChild() { return this.children.at(-1); },
-      getBoundingClientRect: () => ({ width: 900, height: 620 }),
+      getBoundingClientRect: () => ({ ...size }),
       getContext: () => new Proxy({}, { get: (obj, key) => obj[key] ?? (() => {}) }),
     };
   }
@@ -63,6 +63,7 @@ function boot(baseline, response) {
   }
   return {
     document, window, buttons, requests, errors,
+    resize(width, height) { size = { width, height }; window.emit('resize'); },
     state: () => JSON.parse(context.inspect()),
     async tick() { now += 16; frame(now); await new Promise(resolve => setImmediate(resolve)); },
     ui: () => [...elements].map(([id, el]) => [id, el.textContent, el.innerHTML, el.style]),
@@ -70,6 +71,28 @@ function boot(baseline, response) {
 }
 
 (async () => {
+  for (const initial of [{ width: 376, height: 591 }, { width: 606, height: 342 }]) {
+    const game = boot(null, 'network', initial);
+    const original = game.state();
+    for (const [width, height] of [[606, 342], [380, 272], [376, 591]]) {
+      const before = game.state();
+      game.resize(width, height);
+      assert.deepEqual(game.state(), before, 'rotation preserves the complete game world');
+      const canvas = game.document.getElementById('game');
+      const scale = Math.min(width / canvas.width, height / canvas.height);
+      for (const tank of [before.p, before.a]) {
+        assert.ok((tank.x - tank.r) * scale >= 0 && (tank.x + tank.r) * scale <= width);
+        assert.ok((tank.y - tank.r) * scale >= 0 && (tank.y + tank.r) * scale <= height);
+      }
+      game.buttons[3].emit('pointerdown');
+      await game.tick();
+      game.buttons[3].emit('pointerup');
+      assert.ok(game.state().p.x > before.p.x, 'touch movement works after rotation');
+    }
+    assert.equal(game.state().p.hp, original.p.hp, 'rotation does not restart or damage the player');
+    assert.deepEqual(game.errors, []);
+  }
+  console.log('PASS: portrait/landscape rotation preserves state, visibility, and touch movement');
   const baseline = process.argv[2] && fs.readFileSync(process.argv[2], 'utf8');
   for (const response of ['ok', '503', 'network']) {
     const games = [boot(null, response)];

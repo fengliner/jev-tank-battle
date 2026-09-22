@@ -13,6 +13,7 @@ let W=900,H=620,dpr=1,last=0,over=false,playerScore=0,aiScore=0;
 let jevTimer=.2,tacticalTimer=0,pathTimer=0,uiTimer=0;
 let jevInFlight=false,jevFailures=0,jevRetryAt=0;
 let frameErrors=0;
+let arenaInitialized=false;
 
 const keys = new Set();
 const walls=[],bullets=[],particles=[];
@@ -70,8 +71,13 @@ const AI={
 function resize(){
   const r=wrap.getBoundingClientRect();
 
-  W=Math.max(320,r.width);
-  H=Math.max(320,r.height);
+  // Keep world coordinates stable when rotating or resizing the viewport.
+  // CSS fits the complete canvas into the available space without cropping.
+  if(!arenaInitialized){
+    W=Math.max(320,r.width);
+    H=Math.max(320,r.height);
+    arenaInitialized=true;
+  }
 
   dpr=Math.min(
     2,
@@ -92,5 +98,4 @@ window.addEventListener(
 );
 
 resize();
-
 
